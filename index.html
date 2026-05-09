@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Multi-Account Deployer</title>
+    <script src="https://cdn.skypack.dev/@octokit/rest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root { --primary: #0969da; --bg: #f6f8fa; --text: #24292f; --success: #2ea44f; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 15px; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { font-size: 1.2rem; margin: 0 0 20px; text-align: center; }
+        label { display: block; font-weight: 600; margin: 15px 0 5px; font-size: 0.85rem; color: #57606a; }
+        input, select, button { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #d0d7de; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
+        .token-manager { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px dashed #d0d7de; margin-bottom: 20px; }
+        .btn-save { background: #eee; color: #333; font-size: 0.8rem; margin-top: 5px; border: 1px solid #ccc; }
+        .btn-deploy { background: var(--success); color: white; border: none; font-weight: 600; margin-top: 10px; height: 50px; }
+        .status-box { padding: 12px; border-radius: 8px; font-size: 0.85rem; margin-top: 15px; display: none; background: #24292f; color: #fff; max-height: 150px; overflow-y: auto; }
+        .flex { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚀 Multi-Repo Deployer</h2>
+
+    <!-- Token Management -->
+    <div class="token-manager">
+        <label>Saved Accounts</label>
+        <select id="tokenSelect" onchange="loadSelectedToken()">
+            <option value="">-- Select an account --</option>
+        </select>
+        
+        <div id="addTokenSection">
+            <label>Add New Token</label>
+            <input type="text" id="tokenLabel" placeholder="e.g. Work-Profile">
+            <input type="password" id="newToken" placeholder="ghp_xxxxxxxxxxxx">
+            <button class="btn-save" onclick="saveToken()">Save to browser storage</button>
+        </div>
+        <button class="btn-save" style="color: #cf222e;" onclick="deleteToken()">Delete selected account</button>
+    </div>
+
+    <!-- Deployment Inputs -->
+    <label>Repository & Branch</label>
+    <div class="flex">
+        <input type="text" id="repo" placeholder="owner/repo" style="flex: 2;">
+        <input type="text" id="branch" value="main" style="flex: 1;">
+    </div>
+
+    <label>Target Folder (Optional)</label>
+    <input type="text" id="targetDir" placeholder="e.g. static/images">
+
+    <label>Upload Zip or Files</label>
+    <input type="file" id="fileInput" multiple>
+
+    <button id="deployBtn" class="btn-deploy" onclick="handleDeployment()">Push to GitHub</button>
+    
+    <div id="status" class="status-box"></div>
+</div>
+
+<script>
+    // --- TOKEN STORAGE LOGIC ---
+    let tokens = JSON.parse(localStorage.getItem('gh_tokens') || '{}');
+
+    function updateDropdown() {
+        const select = document.getElementById('tokenSelect');
+        select.innerHTML = '<option value="">-- Select an account --</option>';
+        Object.keys(tokens).forEach(label => {
+            const opt = document.createElement('option');
+            opt.value = tokens[label];
+            opt.textContent = label;
+            select.appendChild(opt);
+        });
+    }
+
+    function saveToken() {
+        const label = document.getElementById('tokenLabel').value.trim();
+        const val = document.getElementById('newToken').value.trim();
+        if(!label || !val) return alert("Enter label and token");
+        tokens[label] = val;
+        localStorage.setItem('gh_tokens', JSON.stringify(tokens));
+        updateDropdown();
+        document.getElementById('tokenLabel').value = '';
+        document.getElementById('newToken').value = '';
+        alert("Token saved locally!");
+    }
+
+    function deleteToken() {
+        const select = document.getElementById('tokenSelect');
+        const label = select.options[select.selectedIndex].text;
+        if(confirm(`Delete ${label}?`)) {
+            delete tokens[label];
+            localStorage.setItem('gh_tokens', JSON.stringify(tokens));
+            updateDropdown();
+        }
+    }
+
+    // --- DEPLOYMENT LOGIC ---
+    const log = (msg) => {
+        const s = document.getElementById('status');
+        s.style.display = 'block';
+        s.innerHTML += `<div>> ${msg}</div>`;
+        s.scrollTop = s.scrollHeight;
+    };
+
+    async function handleDeployment() {
+        const token = document.getElementById('tokenSelect').value;
+        const repoFull = document.getElementById('repo').value;
+        const branch = document.getElementById('branch').value;
+        const targetDir = document.getElementById('targetDir').value.replace(/\/$/, '') + '/';
+        const fileInput = document.getElementById('fileInput');
+
+        if(!token) return alert("Select an account first!");
+        if(!repoFull || fileInput.files.length === 0) return alert("Repo and Files required.");
+
+        const [owner, repo] = repoFull.split('/');
+        const octokit = new window.Octokit.Octokit({ auth: token });
+        const cleanTarget = targetDir === '/' ? '' : targetDir;
+
+        document.getElementById('status').innerHTML = '';
+        log("Starting push...");
+
+        try {
+            for (const file of fileInput.files) {
+                if (file.name.endsWith('.zip')) {
+                    log(`Unzipping ${file.name}...`);
+                    const zip = await JSZip.loadAsync(file);
+                    const entries = Object.keys(zip.files).filter(p => !zip.files[p].dir);
+                    
+                    for (const path of entries) {
+                        const content = await zip.files[path].async("uint8array");
+                        const b64 = btoa(Array.from(content).map(b => String.fromCharCode(b)).join(''));
+                        await pushFile(octokit, owner, repo, branch, cleanTarget + path, b64);
+                    }
+                } else {
+                    const b64 = await new Promise(r => {
+                        const reader = new FileReader();
+                        reader.onload = () => r(reader.result.split(',')[1]);
+                        reader.readAsDataURL(file);
+                    });
+                    await pushFile(octokit, owner, repo, branch, cleanTarget + file.name, b64);
+                }
+            }
+            log("SUCCESS: All files synced.");
+        } catch (err) { log("ERROR: " + err.message); }
+    }
+
+    async function pushFile(octokit, owner, repo, branch, path, content) {
+        log(`Syncing: ${path}`);
+        let sha;
+        try {
+            const { data } = await octokit.repos.getContent({ owner, repo, path, ref: branch });
+            sha = data.sha;
+        } catch (e) {}
+
+        await octokit.repos.createOrUpdateFileContents({
+            owner, repo, path, branch,
+            message: "Mobile Deploy",
+            content, sha
+        });
+    }
+
+    updateDropdown(); // Init on load
+</script>
+</body>
+</html>
