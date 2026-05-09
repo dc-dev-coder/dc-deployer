@@ -3,23 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Smart Deployer Pro</title>
-    <script src="https://cdn.skypack.dev/@octokit/rest"></script>
+    <title>GitHub Smart Deployer</title>
+    <!-- Using a more stable CDN link -->
+    <script src="https://unpkg.com/@octokit/rest@19.0.7/dist/index.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root { --primary: #0969da; --bg: #f6f8fa; --text: #24292f; --success: #2ea44f; }
         body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; }
-        .container { max-width: 600px; margin: auto; background: white; padding: 15px; border: 1px solid #d0d7de; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .container { max-width: 600px; margin: auto; background: white; padding: 15px; border: 1px solid #d0d7de; border-radius: 12px; }
         section { border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px; }
-        h3 { font-size: 0.85rem; text-transform: uppercase; color: #57606a; margin-bottom: 10px; letter-spacing: 0.5px; }
+        h3 { font-size: 0.85rem; text-transform: uppercase; color: #57606a; margin-bottom: 10px; }
         input, select, textarea, button { width: 100%; padding: 12px; margin-bottom: 8px; border: 1px solid #d0d7de; border-radius: 8px; box-sizing: border-box; font-size: 0.95rem; }
         button { background: var(--primary); color: white; border: none; font-weight: 600; cursor: pointer; }
         .btn-ghost { background: #f3f4f6; color: #24292f; border: 1px solid #d0d7de; font-size: 0.8rem; }
         .btn-deploy { background: var(--success); height: 55px; font-size: 1.1rem; }
-        .status-box { background: #1b1f23; color: #7ee787; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; max-height: 200px; overflow-y: auto; display: block; margin-top: 10px; border: 1px solid #30363d; }
-        .flex { display: flex; gap: 8px; align-items: center; }
+        .status-box { background: #1b1f23; color: #7ee787; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; max-height: 200px; overflow-y: auto; border: 1px solid #30363d; }
+        .flex { display: flex; gap: 8px; }
         textarea { height: 100px; font-family: monospace; font-size: 0.8rem; background: #fffdef; }
-        .helper-text { font-size: 0.75rem; color: #666; margin-bottom: 5px; display: block; }
     </style>
 </head>
 <body>
@@ -32,35 +32,27 @@
             <button class="btn-ghost" style="width: 80px;" onclick="toggleAddToken()">Add +</button>
         </div>
         
-        <div id="tokenForm" style="display:none; background: #f0f7ff; padding: 10px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #cfe1f2;">
-            <input type="text" id="tokenLabel" placeholder="Nickname (e.g. Work)">
-            <input type="password" id="newToken" placeholder="GitHub Token (ghp_...)">
+        <div id="tokenForm" style="display:none; background: #f0f7ff; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+            <input type="text" id="tokenLabel" placeholder="Nickname">
+            <input type="password" id="newToken" placeholder="ghp_Token">
             <button onclick="saveToken()">Save Token</button>
         </div>
 
-        <select id="repoSelect">
-            <option value="">-- Choose Repository --</option>
-        </select>
-        <div class="flex">
-            <input type="text" id="branch" value="main" placeholder="Branch">
-            <button class="btn-ghost" style="width: 100px;" onclick="fetchRepos()">Refresh</button>
-        </div>
+        <select id="repoSelect"><option value="">-- Choose Repository --</option></select>
+        <input type="text" id="branch" value="main" placeholder="Branch">
     </section>
 
     <section>
-        <h3>2. Mapping Rules (Rename/Direct)</h3>
-        <textarea id="renameRules" placeholder="file1.tsx => /src/page.tsx"></textarea>
-        <div class="flex">
-            <span class="helper-text">Or upload <b>rules.txt</b>:</span>
-            <input type="file" id="ruleFile" accept=".txt">
-        </div>
+        <h3>2. Mapping Rules</h3>
+        <textarea id="renameRules" placeholder="file-from-agent.tsx => /src/components/page.tsx"></textarea>
+        <input type="file" id="ruleFile" accept=".txt">
     </section>
 
     <section>
-        <h3>3. Execution</h3>
+        <h3>3. Push Files</h3>
         <input type="file" id="fileInput" multiple>
         <button class="btn-deploy" onclick="handleDeployment()">Sync to GitHub</button>
-        <div id="status" class="status-box">System ready. Select an account to begin.</div>
+        <div id="status" class="status-box">Ready.</div>
     </section>
 </div>
 
@@ -86,7 +78,7 @@
             localStorage.setItem('gh_tokens', JSON.stringify(tokens)); 
             renderTokens(); 
             toggleAddToken();
-            log(`Account "${l}" saved.`);
+            log(`Account "${l}" ready.`);
         }
     }
 
@@ -101,28 +93,16 @@
         const rSelect = document.getElementById('repoSelect');
         if(!token) return;
         
-        rSelect.innerHTML = '<option>Loading Repos...</option>';
-        log("Fetching repositories from GitHub...");
+        rSelect.innerHTML = '<option>Loading...</option>';
         
         try {
-            const octokit = new window.Octokit.Octokit({ 
-                auth: token,
-                // Ensures we use the latest API version
-                headers: { 'X-GitHub-Api-Version': '2022-11-28' }
-            });
-
-            // Trying to get user repos
+            // Using the UMD global Octokit constructor
+            const octokit = new Octokit({ auth: token });
             const { data } = await octokit.repos.listForAuthenticatedUser({ 
                 sort: 'updated', 
                 per_page: 100,
                 affiliation: 'owner,collaborator,organization_member' 
             });
-
-            if (data.length === 0) {
-                log("No repositories found for this token.", "#ffa198");
-                rSelect.innerHTML = '<option value="">No repos found</option>';
-                return;
-            }
 
             rSelect.innerHTML = '';
             data.forEach(r => {
@@ -131,16 +111,11 @@
                 opt.textContent = r.full_name;
                 rSelect.appendChild(opt);
             });
-            log(`Found ${data.length} repositories.`);
+            log(`Fetched ${data.length} repos.`);
         } catch (e) {
-            log(`Error: ${e.status} ${e.message}`, "#ffa198");
-            if(e.status === 401) log("Check if your token is expired or copied correctly.", "#ffa198");
-            rSelect.innerHTML = '<option value="">Error loading repos</option>';
+            log(`Error fetching: ${e.message}`, "#ffa198");
         }
     }
-
-    // ... (rest of the handleDeployment and pushFile logic remains the same) ...
-    // Note: I'm keeping the logic brief to ensure the response is clear. 
 
     async function handleDeployment() {
         const token = document.getElementById('tokenSelect').value;
@@ -150,15 +125,9 @@
         const ruleFile = document.getElementById('ruleFile').files[0];
         let ruleText = document.getElementById('renameRules').value;
 
-        if(!token || !repoFull || fileInput.files.length === 0) {
-            alert("Missing required fields!");
-            return;
-        }
+        if(!token || !repoFull || fileInput.files.length === 0) return alert("Fill all fields");
 
-        if (ruleFile) {
-            const fileText = await ruleFile.text();
-            ruleText += '\n' + fileText;
-        }
+        if (ruleFile) ruleText += '\n' + await ruleFile.text();
 
         const rules = {};
         ruleText.split('\n').forEach(line => {
@@ -168,11 +137,9 @@
             }
         });
 
-        const octokit = new window.Octokit.Octokit({ auth: token });
+        const octokit = new Octokit({ auth: token });
         const [owner, repo] = repoFull.split('/');
         
-        log(`Deploying to ${repoFull} [${branch}]...`, "#aaa");
-
         for (const file of fileInput.files) {
             let targetPath = rules[file.name] || file.name;
             targetPath = targetPath.replace(/^\//, '');
@@ -183,32 +150,33 @@
                 reader.readAsDataURL(file);
             });
 
-            await pushFile(octokit, owner, repo, branch, targetPath, b64);
-        }
-        log("DEPLOYMENT FINISHED", "#7ee787");
-    }
-
-    async function pushFile(octokit, owner, repo, branch, path, content) {
-        log(`Syncing: ${path}`);
-        try {
-            let sha;
+            log(`Pushing: ${targetPath}`);
             try {
-                const { data } = await octokit.repos.getContent({ owner, repo, path, ref: branch });
-                sha = data.sha;
-            } catch (e) {}
+                let sha;
+                try {
+                    const res = await octokit.repos.getContent({ owner, repo, path: targetPath, ref: branch });
+                    sha = res.data.sha;
+                } catch (e) {}
 
-            await octokit.repos.createOrUpdateFileContents({
-                owner, repo, path, branch,
-                message: "Mobile Sync",
-                content, sha
-            });
-            log(`✓ ${path} success`);
-        } catch (err) {
-            log(`!! ${path} failed: ${err.message}`, "#ffa198");
+                await octokit.repos.createOrUpdateFileContents({
+                    owner, repo, path: targetPath, branch,
+                    message: "Mobile Sync",
+                    content: b64, sha
+                });
+                log(`Success: ${targetPath}`);
+            } catch (err) {
+                log(`Failed: ${targetPath} - ${err.message}`, "#ffa198");
+            }
         }
     }
 
-    renderTokens();
+    // Check if Octokit loaded correctly
+    window.onload = () => {
+        if (typeof Octokit === 'undefined') {
+            log("Critical: Octokit library failed to load. Try refreshing.", "#ffa198");
+        }
+        renderTokens();
+    };
 </script>
 </body>
 </html>
